@@ -1,6 +1,6 @@
 // Service worker : permet d'utiliser l'application hors connexion.
 // Incrementer VERSION si la liste ASSETS change.
-const VERSION = 'v1';
+const VERSION = 'v2';
 const CACHE = `match-logger-${VERSION}`;
 const ASSETS = [
   './',
@@ -39,7 +39,9 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     (async () => {
       const cache = await caches.open(CACHE);
-      const network = fetch(request).then((response) => {
+      // no-cache : on contourne le cache HTTP du navigateur (GitHub Pages = 10 min)
+      // pour toujours recuperer la derniere version publiee.
+      const network = fetch(request, { cache: 'no-cache' }).then((response) => {
         if (response.ok) cache.put(request, response.clone());
         return response;
       });
