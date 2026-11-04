@@ -225,6 +225,31 @@ function dateKey(text) {
   return year * 10000 + Number(m[2]) * 100 + Number(m[1]);
 }
 
+// Journee de championnat calculee a partir des dates : pour chaque equipe, le plus ancien
+// match de championnat = J1. Les matchs sans date lisible n'ont pas de numero.
+function matchdays(records = store.getMatches()) {
+  const byTeam = new Map();
+  for (const r of records) {
+    if (r.competition !== 'championnat' || !dateKey(r.data?.date)) continue;
+    const team = r.team || '';
+    if (!byTeam.has(team)) byTeam.set(team, []);
+    byTeam.get(team).push(r);
+  }
+  const days = new Map();
+  for (const list of byTeam.values()) {
+    byDateDesc(list)
+      .reverse()
+      .forEach((r, i) => days.set(r.id, i + 1));
+  }
+  return days;
+}
+
+function competitionLabel(record, days) {
+  const label = COMPETITIONS[record.competition];
+  const day = days.get(record.id);
+  return day ? `${label} J${day}` : label;
+}
+
 // Plus recent en premier ; matchs sans date lisible a la fin
 function byDateDesc(records) {
   return [...records].sort(
@@ -818,7 +843,7 @@ function renderMatchDetails(record) {
     ['Score', d.score],
     ['Résultat', { Gagne: 'Gagné' }[d.result] || d.result],
     ['Équipe', record.team],
-    ['Compétition', COMPETITIONS[record.competition]],
+    ['Compétition', competitionLabel(record, matchdays())],
   ];
   const playerRows = summary.lineup.map(([posId, p]) => {
     const cards = cardList(p)
@@ -894,7 +919,7 @@ function resultPill(result) {
 function openMatchActions(record) {
   openSheet(record.name, (close) => ({
     body: [
-      h('p', { class: 'muted' }, [record.team || 'Sans équipe', COMPETITIONS[record.competition]].join(' · ')),
+      h('p', { class: 'muted' }, [record.team || 'Sans équipe', competitionLabel(record, matchdays())].join(' · ')),
       h(
         'div',
         { class: 'menu' },
@@ -1139,6 +1164,7 @@ function renderMatchesView() {
   const all = store.getMatches();
   const f = state.listFilter;
   const q = normalize(f.q);
+  const days = matchdays(all);
   const records = byDateDesc(all).filter(
     (r) =>
       (!f.team || r.team === f.team) &&
@@ -1162,7 +1188,7 @@ function renderMatchesView() {
                 'span',
                 { class: 'match-main' },
                 h('span', { class: 'match-name' }, r.name),
-                h('span', { class: 'muted' }, [r.team || 'Sans équipe', COMPETITIONS[r.competition], r.data.opponent && `vs ${r.data.opponent}`].filter(Boolean).join(' · ')),
+                h('span', { class: 'muted' }, [r.team || 'Sans équipe', competitionLabel(r, days), r.data.opponent && `vs ${r.data.opponent}`].filter(Boolean).join(' · ')),
               ),
               h('span', { class: 'match-score' }, r.data.score || ''),
             ),
