@@ -73,6 +73,7 @@ export function resultFromScore(score, location) {
 export function countAssists(players, playerName) {
   let count = 0;
   for (const [, p] of playerEntries(players)) {
+    if (p?.name === CSC) continue;
     for (const g of p?.goals || []) if (g?.assist === playerName) count++;
   }
   return count;
@@ -159,7 +160,7 @@ export function fullReport(records) {
       if (posId in STAR_POINTS) stars.add(name, STAR_POINTS[posId]);
       for (const g of p.goals || []) {
         goals.add(name);
-        if (g?.assist) {
+        if (g?.assist && name !== CSC && g.assist !== CSC) {
           assists.add(g.assist);
           if (!assistLinks.has(name)) assistLinks.set(name, new Counter());
           assistLinks.get(name).add(g.assist);
@@ -258,6 +259,7 @@ export function playerStats(records, playerName) {
     }
 
     for (const [, p] of entries) {
+      if (p?.name === CSC) continue;
       for (const g of p?.goals || []) {
         if (g?.assist === playerName) {
           assistsInMatch++;

@@ -809,13 +809,14 @@ function renderMatchDetails(record) {
       .map((c) => ({ yellow: '🟨', white: '⬜', red: '🟥' })[c])
       .join('');
     const goals = (p.goals || []).length;
+    const assists = p.name ? countAssists(d.players, p.name) : 0;
     return h(
       'tr',
       {},
       h('td', { class: 'muted' }, posId),
       h('td', {}, p.name || 'N/A'),
       h('td', { class: 'num' }, `${p.playtime ?? 90}′`),
-      h('td', {}, `${goals ? '⚽'.repeat(goals) : ''}${cards}`),
+      h('td', {}, `${'⚽'.repeat(goals)}${'🔗'.repeat(assists)}${cards}`),
     );
   });
 
