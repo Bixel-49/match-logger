@@ -216,6 +216,22 @@ function sortedRecords(records) {
   );
 }
 
+// Date saisie "jj/mm/aaaa" (ou jj-mm-aa, jj.mm.aaaa) -> nombre aaaammjj comparable ; 0 si illisible
+function dateKey(text) {
+  const m = String(text || '').match(/(\d{1,2})\s*[/.-]\s*(\d{1,2})\s*[/.-]\s*(\d{2,4})/);
+  if (!m) return 0;
+  let year = Number(m[3]);
+  if (year < 100) year += 2000;
+  return year * 10000 + Number(m[2]) * 100 + Number(m[1]);
+}
+
+// Plus recent en premier ; matchs sans date lisible a la fin
+function byDateDesc(records) {
+  return [...records].sort(
+    (a, b) => dateKey(b.data?.date) - dateKey(a.data?.date) || a.name.localeCompare(b.name, 'fr', { numeric: true }),
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Navigation
 // ---------------------------------------------------------------------------
@@ -1123,7 +1139,7 @@ function renderMatchesView() {
   const all = store.getMatches();
   const f = state.listFilter;
   const q = normalize(f.q);
-  const records = sortedRecords(all).filter(
+  const records = byDateDesc(all).filter(
     (r) =>
       (!f.team || r.team === f.team) &&
       (!f.competition || r.competition === f.competition) &&
