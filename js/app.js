@@ -131,26 +131,42 @@ function canShareFile(file) {
   }
 }
 
+// Type MIME accepte par le menu de partage du telephone pour ce fichier, ou null
+function shareableType(filename) {
+  const preferred = filename.endsWith('.zip')
+    ? ['application/zip', 'application/x-zip-compressed', 'application/octet-stream']
+    : filename.endsWith('.csv')
+      ? ['text/csv', 'text/plain']
+      : filename.endsWith('.json')
+        ? ['application/json', 'text/plain']
+        : ['text/plain'];
+  return preferred.find((type) => canShareFile(new File([''], filename, { type }))) || null;
+}
+
+// Ouvre le menu de partage (WhatsApp, mail...). Si impossible, telecharge le fichier.
+async function shareFile(filename, makeBlob) {
+  const type = shareableType(filename);
+  if (!type) {
+    downloadBlob(filename, makeBlob());
+    toast('Partage direct non disponible : fichier téléchargé, envoie-le depuis WhatsApp (📎 → Document).');
+    return;
+  }
+  const file = new File([makeBlob()], filename, { type });
+  try {
+    await navigator.share({ files: [file], title: filename });
+  } catch (e) {
+    if (e.name !== 'AbortError') {
+      downloadBlob(filename, makeBlob());
+      toast('Partage impossible : fichier téléchargé à la place.');
+    }
+  }
+}
+
 // Boutons "Telecharger" + "Partager" (si le telephone le permet)
 function exportButtons(filename, makeBlob) {
   const download = h('button', { class: 'btn', onclick: () => downloadBlob(filename, makeBlob()) }, '⬇️ Télécharger');
-  const probe = new File([''], filename, { type: 'text/plain' });
-  if (!canShareFile(probe)) return [download];
-  const share = h(
-    'button',
-    {
-      class: 'btn',
-      onclick: async () => {
-        const file = new File([makeBlob()], filename, { type: 'text/plain' });
-        try {
-          await navigator.share({ files: [file], title: filename });
-        } catch (e) {
-          if (e.name !== 'AbortError') downloadBlob(filename, makeBlob());
-        }
-      },
-    },
-    '📤 Partager',
-  );
+  if (!shareableType(filename)) return [download];
+  const share = h('button', { class: 'btn primary', onclick: () => shareFile(filename, makeBlob) }, '📤 Partager');
   return [download, share];
 }
 
@@ -1154,9 +1170,17 @@ function buildArchive(records) {
   return createZip(files);
 }
 
+const archiveName = () => `matchs-${new Date().toISOString().slice(0, 10)}.zip`;
+
+// Envoi direct de tous les matchs (WhatsApp, mail...) en un seul geste
+function shareAllMatches() {
+  const records = store.getMatches();
+  shareFile(archiveName(), () => buildArchive(records));
+}
+
 function openExportAllSheet() {
   const records = store.getMatches();
-  const filename = `matchs-${new Date().toISOString().slice(0, 10)}.zip`;
+  const filename = archiveName();
   openSheet('Exporter tous les matchs', () => ({
     body: [
       h(
@@ -1245,6 +1269,7 @@ function renderMatchesView() {
     h(
       'div',
       { class: 'row wrap' },
+      h('button', { class: 'btn primary', onclick: shareAllMatches, disabled: !all.length }, '📤 Envoyer (WhatsApp…)'),
       h('button', { class: 'btn', onclick: openImportSheet }, '📥 Importer'),
       h('button', { class: 'btn', onclick: openExportAllSheet, disabled: !all.length }, '📦 Tout exporter'),
       h('button', { class: 'btn', onclick: openVerifySheet, disabled: !all.length }, '🔍 Vérifier'),
