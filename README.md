@@ -49,7 +49,9 @@ L'équipe et la compétition sont déduites des dossiers `A/<équipe>/<Championn
 
 ## Mettre à jour l'app
 
-Modifie les fichiers, puis fais `git commit` et `git push`. Les téléphones récupèrent la nouvelle version à la prochaine ouverture de l'app avec du réseau. Si tu ajoutes ou renommes un fichier, ajoute-le à la liste `ASSETS` de `sw.js` et incrémente `VERSION`.
+Modifie les fichiers, puis fais `git commit` et `git push`. Les téléphones récupèrent la nouvelle version à la prochaine ouverture de l'app avec du réseau. Si tu ajoutes ou renommes un fichier, ajoute-le à la liste `ASSETS` de `sw.js`.
+
+La version (affichée en bas de **Réglages**) est définie à un seul endroit : `js/version.js`. Augmente-la à chaque mise à jour (ex. `1.1.0` → `1.2.0`) : ça permet de vérifier sur le téléphone que la nouvelle version est bien arrivée.
 
 ## Tester sur le PC
 

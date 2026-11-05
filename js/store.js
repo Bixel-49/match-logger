@@ -56,6 +56,46 @@ export function applyConfig(config) {
   return players.length;
 }
 
+// Mise a jour depuis un fichier recu d'un autre telephone : ajoute les joueurs et
+// compositions absents, met a jour ceux qui ont change. Rien n'est supprime.
+export function mergeConfig(config) {
+  let addedPlayers = 0;
+  let updatedPlayers = 0;
+  let changedFormations = 0;
+  if (Array.isArray(config?.players)) {
+    const players = getPlayers();
+    const byName = new Map(players.map((p) => [p.name.toLowerCase(), p]));
+    for (const p of config.players) {
+      const name = typeof p?.name === 'string' ? p.name.trim() : '';
+      if (!name) continue;
+      const position = String(p.position || '').toUpperCase();
+      const existing = byName.get(name.toLowerCase());
+      if (!existing) {
+        const added = { name, position };
+        players.push(added);
+        byName.set(name.toLowerCase(), added);
+        addedPlayers++;
+      } else if (position && existing.position !== position) {
+        existing.position = position;
+        updatedPlayers++;
+      }
+    }
+    if (addedPlayers + updatedPlayers) setPlayers(players);
+  }
+  if (config?.formations && typeof config.formations === 'object' && !Array.isArray(config.formations)) {
+    const formations = { ...getFormations() };
+    for (const [name, positions] of Object.entries(config.formations)) {
+      if (!Array.isArray(positions)) continue;
+      const next = positions.map(String);
+      if (JSON.stringify(formations[name]) === JSON.stringify(next)) continue;
+      formations[name] = next;
+      changedFormations++;
+    }
+    if (changedFormations) write(KEYS.formations, formations);
+  }
+  return { addedPlayers, updatedPlayers, changedFormations };
+}
+
 export function exportConfig() {
   return { formations: getFormations(), players: getPlayers() };
 }

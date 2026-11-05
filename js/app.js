@@ -19,6 +19,10 @@ import {
   resultFromScore,
 } from './stats.js';
 import { createZip, readZip } from './zip.js';
+import './version.js';
+
+// Version affichee dans Reglages (definie dans js/version.js)
+const APP_VERSION = self.APP_VERSION;
 
 // ---------------------------------------------------------------------------
 // Utilitaires DOM
@@ -1043,13 +1047,16 @@ function locateFromPath(path) {
 async function importFiles(fileList, defaults) {
   const sources = [];
   const errors = [];
+  const configs = [];
   for (const file of fileList) {
     const path = file.webkitRelativePath || file.name;
     try {
       if (/\.zip$/i.test(file.name)) {
         for (const entry of await readZip(file)) if (/\.json$/i.test(entry.path)) sources.push(entry);
       } else if (/\.txt$/i.test(file.name)) {
-        sources.push(...bundleEntries(await file.text(), path));
+        const { entries, config } = readBundle(await file.text(), path);
+        sources.push(...entries);
+        if (config) configs.push(config);
       } else if (/\.json$/i.test(file.name)) {
         sources.push({ path, content: await file.text() });
       }
@@ -1061,7 +1068,8 @@ async function importFiles(fileList, defaults) {
   const matches = store.getMatches();
   let added = 0;
   let replaced = 0;
-  for (const { path, content } of sources) {
+  let unchanged = 0;
+  for (const { path, content, meta } of sources) {
     const fileName = path.split('/').pop();
     if (/^config/i.test(fileName)) continue;
     let data;
@@ -1073,6 +1081,24 @@ async function importFiles(fileList, defaults) {
     }
     if (!data || typeof data !== 'object' || Array.isArray(data) || !('players' in data || 'date' in data)) {
       errors.push(`${path} : ce n’est pas un fichier de match`);
+      continue;
+    }
+    if (meta) {
+      // Paquet .txt : on retrouve le match par son identifiant, et la version la plus recente gagne
+      const record = { name: meta.name, team: meta.team, competition: COMPETITIONS[meta.competition] ? meta.competition : 'autre', data };
+      const existing =
+        matches.find((m) => meta.id && m.id === meta.id) ||
+        matches.find((m) => m.name === record.name && (m.team || '') === record.team && m.competition === record.competition);
+      const updatedAt = meta.updatedAt || new Date().toISOString();
+      if (!existing) {
+        matches.push({ id: meta.id || store.uid(), ...record, updatedAt });
+        added++;
+      } else if ((existing.updatedAt || '') >= updatedAt || JSON.stringify(existing.data) === JSON.stringify(data)) {
+        unchanged++; // deja a jour, ou modifie plus recemment sur ce telephone
+      } else {
+        Object.assign(existing, record, { updatedAt });
+        replaced++;
+      }
       continue;
     }
     const located = defaults.useFolders ? locateFromPath(path) : { team: '', competition: '' };
@@ -1092,11 +1118,21 @@ async function importFiles(fileList, defaults) {
     }
   }
 
+  // Joueurs et compositions du paquet .txt : ajout des absents, mise a jour des autres
+  let addedPlayers = 0;
+  let updatedPlayers = 0;
+  for (const config of configs) {
+    let merged;
+    if (!persistOrWarn(() => (merged = store.mergeConfig(config)))) return null;
+    addedPlayers += merged.addedPlayers;
+    updatedPlayers += merged.updatedPlayers;
+  }
+
   if (added + replaced) {
     if (!persistOrWarn(() => store.saveMatches(matches))) return null;
     store.requestPersistence();
   }
-  return { added, replaced, errors };
+  return { added, replaced, unchanged, addedPlayers, updatedPlayers, errors };
 }
 
 function openImportSheet() {
@@ -1109,15 +1145,16 @@ function openImportSheet() {
       status.replaceChildren(h('p', { class: 'muted' }, 'Import en cours…'));
       const result = await importFiles(files, defaults);
       if (!result) return;
-      const { added, replaced, errors } = result;
+      const { added, replaced, unchanged, addedPlayers, updatedPlayers, errors } = result;
       status.replaceChildren(
-        h('p', {}, `Ajoutés : ${added} · Remplacés (déjà présents) : ${replaced}`),
+        h('p', {}, `Ajoutés : ${added} · Mis à jour : ${replaced}` + (unchanged ? ` · Déjà à jour : ${unchanged}` : '')),
+        addedPlayers + updatedPlayers ? h('p', {}, `Joueurs ajoutés : ${addedPlayers} · Joueurs mis à jour : ${updatedPlayers}`) : null,
         errors.length ? h('ul', { class: 'warnings' }, errors.map((e) => h('li', {}, e))) : null,
       );
       render();
       if (!errors.length) {
         await close();
-        toast(`${added + replaced} match(s) importé(s)`);
+        toast(added + replaced ? `${added + replaced} match(s) importé(s)` : 'Tout était déjà à jour');
       }
     };
 
@@ -1168,25 +1205,36 @@ function archiveEntries(records) {
     let path = `${folder}/${safeFileName(r.name) || 'match'}.json`;
     for (let i = 2; used.has(path); i++) path = `${folder}/${safeFileName(r.name)} (${i}).json`;
     used.add(path);
-    return { path, data: r.data };
+    return { path, record: r };
   });
 }
 
 function buildArchive(records) {
-  return createZip(archiveEntries(records).map(({ path, data }) => ({ path, content: JSON.stringify(data, null, 2) })));
+  return createZip(archiveEntries(records).map(({ path, record }) => ({ path, content: JSON.stringify(record.data, null, 2) })));
 }
 
 // Meme contenu que le ZIP, dans un seul fichier texte (JSON). Chrome refuse de partager
 // les .zip, mais accepte les .txt : c'est ce format qui part sur WhatsApp.
 const BUNDLE_APP = 'match-logger';
 
+// Tout ce qu'il faut pour mettre un autre telephone a jour : joueurs, compositions et,
+// pour chaque match, son identifiant et sa date de modification (la plus recente gagne).
 function buildBundle(records) {
-  const bundle = { app: BUNDLE_APP, version: 1, files: archiveEntries(records) };
+  const files = archiveEntries(records).map(({ path, record: r }) => ({
+    path,
+    id: r.id,
+    name: r.name,
+    team: r.team || '',
+    competition: r.competition,
+    updatedAt: r.updatedAt || '',
+    data: r.data,
+  }));
+  const bundle = { app: BUNDLE_APP, version: 2, exportedAt: new Date().toISOString(), config: store.exportConfig(), files };
   return new Blob([JSON.stringify(bundle)], { type: 'text/plain' });
 }
 
-// Lit un .txt : soit un paquet de matchs (buildBundle), soit un simple match JSON
-function bundleEntries(text, path) {
+// Lit un .txt : soit un paquet (buildBundle : matchs + joueurs), soit un simple match JSON
+function readBundle(text, path) {
   const raw = text.replace(/^﻿/, '');
   let parsed;
   try {
@@ -1195,11 +1243,17 @@ function bundleEntries(text, path) {
     throw new Error('fichier texte illisible (ce n’est pas un export de l’app)');
   }
   if (parsed?.app === BUNDLE_APP && Array.isArray(parsed.files)) {
-    return parsed.files
+    const entries = parsed.files
       .filter((f) => f && typeof f.path === 'string' && f.data && typeof f.data === 'object')
-      .map((f) => ({ path: f.path, content: JSON.stringify(f.data) }));
+      .map((f) => ({
+        path: f.path,
+        content: JSON.stringify(f.data),
+        // Infos du match (absentes des paquets version 1 : on retombe alors sur le chemin)
+        meta: typeof f.name === 'string' ? { id: f.id, name: f.name, team: f.team || '', competition: f.competition, updatedAt: f.updatedAt || '' } : null,
+      }));
+    return { entries, config: parsed.config || null };
   }
-  return [{ path: path.replace(/\.txt$/i, '.json'), content: raw }];
+  return { entries: [{ path: path.replace(/\.txt$/i, '.json'), content: raw }], config: null };
 }
 
 const exportDate = () => new Date().toISOString().slice(0, 10);
@@ -1212,21 +1266,11 @@ function shareAllMatches() {
   shareFile(bundleName(), () => buildBundle(records));
 }
 
-function openExportAllSheet() {
+// Telecharge directement le ZIP de tous les matchs (sauvegarde, programme Python)
+function exportAllMatches() {
   const records = store.getMatches();
-  const filename = archiveName();
-  openSheet('Exporter tous les matchs', () => ({
-    body: [
-      h(
-        'p',
-        {},
-        `${plural(records.length, 'match')} dans un fichier ZIP, rangés en A/Équipe/Championnat|Coupe/. `,
-        'Décompressé dans le dossier du programme Python, il fonctionne aussi sur PC (rapport club compris).',
-      ),
-      h('p', { class: 'muted' }, 'C’est aussi ta sauvegarde : les matchs ne sont stockés que sur ce téléphone.'),
-      h('div', { class: 'row' }, exportButtons(filename, () => buildArchive(records))),
-    ],
-  }));
+  downloadBlob(archiveName(), buildArchive(records));
+  toast(`${plural(records.length, 'match')} exporté${records.length > 1 ? 's' : ''} en ZIP`);
 }
 
 function openVerifySheet() {
@@ -1300,12 +1344,12 @@ function renderMatchesView() {
     'div',
     { class: 'stack' },
     h('div', { class: 'view-head' }, h('h1', {}, 'Matchs'), h('span', { class: 'muted' }, plural(all.length, 'match'))),
+    h('button', { class: 'btn primary block', onclick: shareAllMatches, disabled: !all.length }, '📤 Envoyer (WhatsApp…)'),
     h(
       'div',
-      { class: 'row wrap' },
-      h('button', { class: 'btn primary', onclick: shareAllMatches, disabled: !all.length }, '📤 Envoyer (WhatsApp…)'),
+      { class: 'grid3' },
       h('button', { class: 'btn', onclick: openImportSheet }, '📥 Importer'),
-      h('button', { class: 'btn', onclick: openExportAllSheet, disabled: !all.length }, '📦 Tout exporter'),
+      h('button', { class: 'btn', onclick: exportAllMatches, disabled: !all.length }, '📦 Exporter'),
       h('button', { class: 'btn', onclick: openVerifySheet, disabled: !all.length }, '🔍 Vérifier'),
     ),
     h(
@@ -1740,7 +1784,11 @@ function renderSettingsView() {
         'div',
         { class: 'row wrap' },
         h('button', { class: 'btn', onclick: () => configInput.click() }, '📥 Importer config.json'),
-        exportButtons('config.json', () => new Blob([JSON.stringify(store.exportConfig(), null, 2)], { type: 'application/json' })),
+        h(
+          'button',
+          { class: 'btn', onclick: () => downloadBlob('config.json', new Blob([JSON.stringify(store.exportConfig(), null, 2)], { type: 'application/json' })) },
+          '⬇️ Télécharger',
+        ),
       ),
     ),
     h(
@@ -1787,7 +1835,7 @@ function renderSettingsView() {
         '🗑️ Tout effacer',
       ),
     ),
-    h('p', { class: 'muted small center' }, 'Match Logger · version mobile'),
+    h('p', { class: 'muted small center' }, `Match Logger · version ${APP_VERSION}`),
   );
 }
 

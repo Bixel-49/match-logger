@@ -1,6 +1,7 @@
 // Service worker : permet d'utiliser l'application hors connexion.
-// Incrementer VERSION si la liste ASSETS change.
-const VERSION = 'v2';
+// La version vient de js/version.js. La changer vide l'ancien cache des telephones.
+importScripts('./js/version.js');
+const VERSION = self.APP_VERSION;
 const CACHE = `match-logger-${VERSION}`;
 const ASSETS = [
   './',
@@ -10,6 +11,7 @@ const ASSETS = [
   './js/store.js',
   './js/stats.js',
   './js/zip.js',
+  './js/version.js',
   './manifest.webmanifest',
   './icons/icon.svg',
   './icons/icon-192.png',
