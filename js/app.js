@@ -1048,6 +1048,8 @@ async function importFiles(fileList, defaults) {
     try {
       if (/\.zip$/i.test(file.name)) {
         for (const entry of await readZip(file)) if (/\.json$/i.test(entry.path)) sources.push(entry);
+      } else if (/\.txt$/i.test(file.name)) {
+        sources.push(...bundleEntries(await file.text(), path));
       } else if (/\.json$/i.test(file.name)) {
         sources.push({ path, content: await file.text() });
       }
@@ -1119,7 +1121,7 @@ function openImportSheet() {
       }
     };
 
-    const fileInput = h('input', { type: 'file', accept: '.json,.zip,application/json,application/zip', multiple: true, hidden: true, onchange: (e) => run(e.target.files) });
+    const fileInput = h('input', { type: 'file', accept: '.json,.zip,.txt,application/json,application/zip,text/plain', multiple: true, hidden: true, onchange: (e) => run(e.target.files) });
     const dirInput = h('input', { type: 'file', webkitdirectory: true, multiple: true, hidden: true, onchange: (e) => run(e.target.files) });
 
     return {
@@ -1127,7 +1129,7 @@ function openImportSheet() {
         h(
           'p',
           {},
-          'Fichiers .json de l’application PC, ou un .zip du dossier des matchs. Les dossiers « Équipe / Championnat | Coupe » sont reconnus automatiquement.',
+          'Fichiers .json de l’application PC, un .zip du dossier des matchs, ou le .txt reçu par WhatsApp (bouton « Envoyer »). Les dossiers « Équipe / Championnat | Coupe » sont reconnus automatiquement.',
         ),
         h(
           'label',
@@ -1152,30 +1154,62 @@ function openImportSheet() {
       ],
       actions: [
         h('button', { class: 'btn', onclick: () => dirInput.click() }, '📂 Un dossier'),
-        h('button', { class: 'btn primary', onclick: () => fileInput.click() }, '📄 Fichiers / ZIP'),
+        h('button', { class: 'btn primary', onclick: () => fileInput.click() }, '📄 Fichiers / ZIP / TXT'),
       ],
     };
   });
 }
 
-function buildArchive(records) {
+// Chemins A/<equipe>/<Championnat|Coupe|Autre>/<match>.json, communs au ZIP et au TXT
+function archiveEntries(records) {
   const used = new Set();
-  const files = sortedRecords(records).map((r) => {
+  return sortedRecords(records).map((r) => {
     const folder = `A/${safeFileName(r.team || 'Sans équipe')}/${COMPETITIONS[r.competition] || 'Autre'}`;
     let path = `${folder}/${safeFileName(r.name) || 'match'}.json`;
     for (let i = 2; used.has(path); i++) path = `${folder}/${safeFileName(r.name)} (${i}).json`;
     used.add(path);
-    return { path, content: JSON.stringify(r.data, null, 2) };
+    return { path, data: r.data };
   });
-  return createZip(files);
 }
 
-const archiveName = () => `matchs-${new Date().toISOString().slice(0, 10)}.zip`;
+function buildArchive(records) {
+  return createZip(archiveEntries(records).map(({ path, data }) => ({ path, content: JSON.stringify(data, null, 2) })));
+}
 
-// Envoi direct de tous les matchs (WhatsApp, mail...) en un seul geste
+// Meme contenu que le ZIP, dans un seul fichier texte (JSON). Chrome refuse de partager
+// les .zip, mais accepte les .txt : c'est ce format qui part sur WhatsApp.
+const BUNDLE_APP = 'match-logger';
+
+function buildBundle(records) {
+  const bundle = { app: BUNDLE_APP, version: 1, files: archiveEntries(records) };
+  return new Blob([JSON.stringify(bundle)], { type: 'text/plain' });
+}
+
+// Lit un .txt : soit un paquet de matchs (buildBundle), soit un simple match JSON
+function bundleEntries(text, path) {
+  const raw = text.replace(/^﻿/, '');
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error('fichier texte illisible (ce n’est pas un export de l’app)');
+  }
+  if (parsed?.app === BUNDLE_APP && Array.isArray(parsed.files)) {
+    return parsed.files
+      .filter((f) => f && typeof f.path === 'string' && f.data && typeof f.data === 'object')
+      .map((f) => ({ path: f.path, content: JSON.stringify(f.data) }));
+  }
+  return [{ path: path.replace(/\.txt$/i, '.json'), content: raw }];
+}
+
+const exportDate = () => new Date().toISOString().slice(0, 10);
+const archiveName = () => `matchs-${exportDate()}.zip`;
+const bundleName = () => `matchs-${exportDate()}.txt`;
+
+// Envoi direct de tous les matchs (WhatsApp, mail...) en un seul geste, au format .txt
 function shareAllMatches() {
   const records = store.getMatches();
-  shareFile(archiveName(), () => buildArchive(records));
+  shareFile(bundleName(), () => buildBundle(records));
 }
 
 function openExportAllSheet() {
