@@ -225,21 +225,34 @@ function dateKey(text) {
   return year * 10000 + Number(m[2]) * 100 + Number(m[1]);
 }
 
-// Journee de championnat calculee a partir des dates : pour chaque equipe, le plus ancien
-// match de championnat = J1. Les matchs sans date lisible n'ont pas de numero.
+// Journee choisie a la main (data.matchday), 0 si non renseignee
+function manualMatchday(record) {
+  const n = Number(record.data?.matchday);
+  return Number.isInteger(n) && n > 0 ? n : 0;
+}
+
+// Journees de championnat, par equipe, dans l'ordre des dates : une journee choisie a la
+// main est gardee telle quelle, sinon on prend celle du match precedent + 1 (J1 au depart).
+// Un match sans date lisible n'a de numero que s'il a ete choisi a la main.
 function matchdays(records = store.getMatches()) {
   const byTeam = new Map();
+  const days = new Map();
   for (const r of records) {
-    if (r.competition !== 'championnat' || !dateKey(r.data?.date)) continue;
+    if (r.competition !== 'championnat') continue;
+    if (!dateKey(r.data?.date)) {
+      if (manualMatchday(r)) days.set(r.id, manualMatchday(r));
+      continue;
+    }
     const team = r.team || '';
     if (!byTeam.has(team)) byTeam.set(team, []);
     byTeam.get(team).push(r);
   }
-  const days = new Map();
   for (const list of byTeam.values()) {
-    byDateDesc(list)
-      .reverse()
-      .forEach((r, i) => days.set(r.id, i + 1));
+    let previous = 0;
+    for (const r of byDateDesc(list).reverse()) {
+      previous = manualMatchday(r) || previous + 1;
+      days.set(r.id, previous);
+    }
   }
   return days;
 }
@@ -705,6 +718,31 @@ function renderMatchView() {
   });
   const refreshNamePlaceholder = () => (nameInput.placeholder = defaultMatchName(d) || 'ex : 2026-10-25 Saint-Jean');
 
+  // Journee : vide = deduite du match precedent (affichee en placeholder)
+  const autoMatchday = () => {
+    const others = store.getMatches().filter((m) => m.id !== ed.id);
+    const current = { id: '__editing', team: ed.team.trim(), competition: 'championnat', data: { ...d, matchday: undefined } };
+    return matchdays([...others, current]).get('__editing');
+  };
+  const matchdayInput = h('input', {
+    class: 'input',
+    type: 'number',
+    min: 1,
+    inputmode: 'numeric',
+    value: manualMatchday(ed) || '',
+    oninput: (e) => {
+      const n = parseInt(e.target.value, 10);
+      if (n > 0) d.matchday = n;
+      else delete d.matchday;
+      touchEditor();
+    },
+  });
+  const refreshMatchdayPlaceholder = () => {
+    const n = autoMatchday();
+    matchdayInput.placeholder = n ? `auto : J${n}` : 'auto';
+  };
+  refreshMatchdayPlaceholder();
+
   const infos = h(
     'section',
     { class: 'card' },
@@ -712,7 +750,7 @@ function renderMatchView() {
     h(
       'div',
       { class: 'grid2' },
-      field('Date', h('input', { class: 'input', value: d.date, placeholder: 'jj/mm/aaaa', oninput: (e) => (bind('date')(e), refreshNamePlaceholder()) })),
+      field('Date', h('input', { class: 'input', value: d.date, placeholder: 'jj/mm/aaaa', oninput: (e) => (bind('date')(e), refreshNamePlaceholder(), refreshMatchdayPlaceholder()) })),
       field('Adversaire', h('input', { class: 'input', value: d.opponent, oninput: (e) => (bind('opponent')(e), refreshNamePlaceholder()) })),
       field(
         'Lieu',
@@ -763,6 +801,7 @@ function renderMatchView() {
           oninput: (e) => {
             ed.team = e.target.value;
             touchEditor();
+            refreshMatchdayPlaceholder();
           },
         }),
       ),
@@ -771,8 +810,10 @@ function renderMatchView() {
         selectInput(competitionOptions(), ed.competition, (v) => {
           ed.competition = v;
           touchEditor();
+          rerenderKeepScroll();
         }),
       ),
+      ed.competition === 'championnat' ? field('Journée', matchdayInput) : null,
     ),
     h('datalist', { id: 'team-list' }, teams.map((t) => h('option', { value: t }))),
     field('Commentaires', h('textarea', { class: 'input', rows: 3, value: d.comments, oninput: bind('comments') })),
