@@ -136,6 +136,17 @@ textarea {
   width: 100%;
 }
 
+/* Version + bouton "+ Nouveau" en haut de la page Match */
+.view-head > .head-actions {
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+}
+
+.app-version {
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
 .muted {
   color: var(--muted);
 }

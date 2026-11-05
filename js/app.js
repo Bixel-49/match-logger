@@ -874,7 +874,12 @@ function renderMatchView() {
       h('h1', {}, ed.id ? ed.name : 'Nouveau match'),
       ed.dirty ? h('span', { class: 'pill warn' }, 'Non enregistré') : ed.id ? h('span', { class: 'pill ok' }, 'Enregistré') : null,
     ),
-    h('button', { class: 'btn small', onclick: startNewMatch }, '+ Nouveau'),
+    h(
+      'div',
+      { class: 'head-actions' },
+      h('span', { class: 'muted app-version' }, `v${APP_VERSION}`),
+      h('button', { class: 'btn small', onclick: startNewMatch }, '+ Nouveau'),
+    ),
   );
 
   const notice = store.getPlayers().length
